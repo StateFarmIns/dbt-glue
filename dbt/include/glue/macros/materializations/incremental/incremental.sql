@@ -14,8 +14,21 @@
   {% if existing_relation_type is not none %}
       {%- set target_relation = target_relation.incorporate(type=existing_relation_type if existing_relation_type != "iceberg_table" else "table") -%}
   {% endif %}
-  {%- set tmp_relation = make_temp_relation(this, '_tmp') -%}
+  {%- set custom_temp_suffix = config.get('custom_temp_suffix', default='tmp') -%}
+  {%- set tmp_relation = make_temp_relation(this, '_' ~ custom_temp_suffix) -%}
   {%- set is_tmp_relation_created = 'False' -%} 
+  {%- set use_iceberg_temp_views = config.get('use_iceberg_temp_views', default='False')  -%} 
+  
+  {%- if file_format == 'iceberg' and strategy == 'merge' -%}
+    {# If iceberg and incremental merge strategy, then make tmp_relation a table, 
+       because merge strategy optimizations may work best with tables #}
+    {%- set tmp_relation = tmp_relation.incorporate(type="table")  -%}
+  {%- elif file_format == 'iceberg' and use_iceberg_temp_views == 'False' -%}
+    {# If iceberg and not merge strategy but config use_iceberg_temp_views == 'False', 
+    then make tmp_relation a table, otherwise, by default tmp_relation will be a view #}
+    {%- set tmp_relation = tmp_relation.incorporate(type="table")  -%}
+  {%- endif -%}
+
   {%- set unique_key = config.get('unique_key', none) -%}
   {%- set partition_by = config.get('partition_by', none) -%}
   {%- set incremental_predicates = config.get('predicates', none) or config.get('incremental_predicates', none) -%}

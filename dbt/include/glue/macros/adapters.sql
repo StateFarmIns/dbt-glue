@@ -43,11 +43,9 @@
 
 {% endmacro %}
 
-
 {% macro glue__create_csv_table(model, agate_table) -%}
     {{ adapter.create_csv_table(model, agate_table) }}
 {%- endmacro %}
-
 
 {% macro glue__load_csv_rows(model, agate_table) %}
   {{return('')}}
@@ -55,9 +53,9 @@
 
 {% macro glue__make_target_relation(relation, file_format) %}
     {%- set iceberg_catalog = adapter.get_custom_iceberg_catalog_namespace() -%}
-    {%- set first_iceberg_load = (file_format == 'iceberg') -%}
+    {%- set is_iceberg = (file_format == 'iceberg') -%}
     {%- set non_null_catalog = (iceberg_catalog is not none) -%}
-    {%- if non_null_catalog and first_iceberg_load %}
+    {%- if non_null_catalog and is_iceberg %}
         {# Check if the schema already includes the catalog to avoid duplication #}
         {%- if relation.schema.startswith(iceberg_catalog ~ '.') %}
             {%- do return(relation) -%}
@@ -77,27 +75,34 @@
     {%- set full_relation = glue__make_target_relation(relation, file_format) -%}
   {%- endif -%}
 
-  {% call statement('drop_relation', auto_begin=False) -%}
-      {%- if relation.type == 'view' and file_format != 'iceberg' %}
-          drop view if exists {{ this }}
-      {%- else -%}
-          drop table if exists {{ full_relation }}
-      {%- endif %}
+  {{ adapter.dispatch('drop_relation', 'dbt')(full_relation) }}
+{% endmacro %}
+
+{% macro glue__drop_view2(relation) -%}
+  {%- set file_format = config.get('file_format', default='parquet') -%}
+  {% call statement('drop_view', auto_begin=False) -%}
+    {%- if file_format != 'iceberg' %}
+      drop view if exists {{ relation }}
+    {%- else -%}
+      drop table if exists {{ relation }}
+    {%- endif %}
   {%- endcall %}
 {% endmacro %}
 
 {% macro glue__make_temp_relation(base_relation, suffix) %}
   {% set tmp_identifier = base_relation.identifier ~ suffix %}
-  {#-- If target profile has temp_schema set, allows _tmp relations to be built in separate catalog when physicalized #}
+  {# -- If target profile has temp_schema set, allows _tmp relations to be built in separate catalog when physicalized #}
   {% set tmp_schema = target.temp_schema if target.temp_schema else base_relation.schema %}
-  {% set tmp_relation = base_relation.incorporate(path={"schema": tmp_schema, "identifier": tmp_identifier}) -%}
+  (# -- By default, temp relations will be temporary views, but can be set to temp tables later if warranted #} 
+  {% set tmp_relation = base_relation.incorporate(path={"schema": tmp_schema, "identifier": tmp_identifier}, type="view") -%}
   {% do return(tmp_relation) %}
 {% endmacro %}
 
 {% macro glue__create_temporary_view(relation, sql) -%}
   {%- set file_format = config.get('file_format', default='parquet') -%}
 
-  {% if file_format == 'iceberg' %}
+  {% if file_format == 'iceberg' and relation.type == 'table' %}
+    {# -- If the temp relation is a table and iceberg, then create temporary table, otherwise view #}
     {%- set full_relation = glue__make_target_relation(relation, file_format) -%}
     create or replace table {{ full_relation }} using iceberg as {{ sql }}
   {% else %}
@@ -156,17 +161,6 @@
 {% macro glue__snapshot_get_time() -%}
     current_timestamp()
 {%- endmacro %}
-
-{% macro glue__drop_view(relation) -%}
-  {%- set file_format = config.get('file_format', default='parquet') -%}
-  {% call statement('drop_view', auto_begin=False) -%}
-    {%- if file_format != 'iceberg' %}
-      drop view if exists {{ relation }}
-    {%- else -%}
-      drop table if exists {{ relation }}
-    {%- endif %}
-  {%- endcall %}
-{% endmacro %}
 
 {% macro glue__describe_table(relation) -%}
     {% set tmp_relation = adapter.describe_table(relation) %}
