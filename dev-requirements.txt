@@ -19,7 +19,7 @@ pytest-dotenv
 pytest-csv
 flaky
 mypy==1.15.0
-black==25.1.0
+black==26.10.1
 
 # Adapter specific dependencies
 waiter
